@@ -1,0 +1,17 @@
+# Visual Studio
+.vs/
+*.suo
+*.user
+*.userosscache
+*.sln.docstates
+
+# Build directories
+x64/
+Debug/
+Release/
+bin/
+obj/
+
+# 기타 무시할 파일
+*.log
+*.tmp
