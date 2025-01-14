@@ -121,19 +121,85 @@ int InstallRootCA(LPCTSTR certFilePath, BOOL Wide) //Wide == FALSE(Current User�
 	return 0;
 }
 
-int _tmain()
+DWORD WINAPI RegistryWatch(LPVOID lpParam)
 {
-	if (SetProxy(_T("127.0.0.1:8080")) != 0)
-		cout << "Failed SetProxy" << endl;
-	else
-		cout << "Proxy Set Succese" << endl;
+	HKEY hKey;
+	HANDLE hEvent;
+	
+	LONG lResult = RegOpenKeyEx(HKEY_CURRENT_USER, INTERNET_SETTINGS, 0, KEY_NOTIFY | KEY_QUERY_VALUE | KEY_SET_VALUE, &hKey);
+	if (lResult != ERROR_SUCCESS)
+		return 1;
 
-	if (InstallRootCA(CA_CERT_FILE, FALSE) != 0)
-		cout << "Failed, CA Install" << endl;
-	else
-		cout << "CA Install Succese" << endl;
+	hEvent = CreateEvent(NULL, FALSE, FALSE, NULL);
+	if (!hEvent)
+	{
+		RegCloseKey(hKey);
+		return 2;
+	}
 
-	getchar();
+	while (true)
+	{
+		lResult = RegNotifyChangeKeyValue(hKey, FALSE, REG_NOTIFY_CHANGE_LAST_SET, hEvent, TRUE);
+		if (lResult != ERROR_SUCCESS)
+			break;
+
+		DWORD dwWait = WaitForSingleObject(hEvent, INFINITE);
+		if (dwWait == WAIT_OBJECT_0)
+		{
+			DWORD dwType = 0, dwEnable = 0, dwSize = sizeof(dwEnable);
+			if (RegQueryValueEx(hKey, _T("ProxyEnable"), NULL, &dwType, (BYTE*)&dwEnable, &dwSize) == ERROR_SUCCESS)
+			{
+				if (dwEnable == 0)
+				{
+					MessageBox(NULL, _T("프록시 설정 변경 감지"), _T("경고"), MB_OK | MB_ICONWARNING);
+					dwEnable = 1;
+					RegSetValueEx(hKey, _T("ProxyEnable"), 0, REG_DWORD, (BYTE*)&dwEnable, sizeof(dwEnable));
+
+					InternetSetOption(NULL, INTERNET_OPTION_SETTINGS_CHANGED, NULL, 0);
+					InternetSetOption(NULL, INTERNET_OPTION_REFRESH, NULL, 0);
+				}
+			}
+		}
+	}
+
+	CloseHandle(hEvent);
+	RegCloseKey(hKey);
+	return 0;
+}
+
+//int _tmain()
+//{
+//	if (SetProxy(_T("127.0.0.1:8080")) != 0)
+//		cout << "Failed SetProxy" << endl;
+//	else
+//		cout << "Proxy Set Succese" << endl;
+//
+//	if (InstallRootCA(CA_CERT_FILE, FALSE) != 0)
+//		cout << "Failed, CA Install" << endl;
+//	else
+//		cout << "CA Install Succese" << endl;
+//
+//	getchar();
+//
+//	return 0;
+//}
+
+int APIENTRY WinMain(HINSTANCE hInst, HINSTANCE hPrev, LPSTR lpCmd, int nShow)
+{
+	HANDLE hThread = CreateThread(NULL, 0, RegistryWatch, NULL, 0, NULL);
+
+	SetProxy(_T("127.0.0.1:8080"));
+	InstallRootCA(CA_CERT_FILE, FALSE);
+
+	MSG msg;
+	while (GetMessage(&msg, NULL, 0, 0))
+	{
+		TranslateMessage(&msg);
+		DispatchMessage(&msg);
+	}
+
+	WaitForSingleObject(hThread, INFINITE);
+	CloseHandle(hThread);
 
 	return 0;
 }
