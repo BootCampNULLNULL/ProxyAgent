@@ -1,8 +1,10 @@
+#define _CRT_SECURE_NO_WARNINGS
 #include <windows.h>
 #include <wininet.h>
 #include <wincrypt.h>
 #include <tchar.h>
 #include <iostream>
+#include "resource.h"
 using namespace std;
 
 #pragma comment(lib,"wininet.lib")	//InternetSetOption
@@ -14,32 +16,49 @@ using namespace std;
 #define RUN_SETTINGS \
 	_T("Software\\Microsoft\\Windows\\CurrentVersion\\Run")
 
-int SetProxy(LPCTSTR IpPort)
+#define WM_TRAYICON		WM_USER+1
+
+int SetProxy(LPCTSTR IpPort,BOOL Check = TRUE)
 {
 	HKEY hKey;
-	
-	LONG lResult = RegOpenKeyEx(HKEY_CURRENT_USER, INTERNET_SETTINGS, 0, KEY_SET_VALUE, &hKey);
+	DWORD Type = 0, Size = sizeof(DWORD);
+	static DWORD OldValue = 0;
+	LONG lResult = RegOpenKeyEx(HKEY_CURRENT_USER, INTERNET_SETTINGS, 0, KEY_SET_VALUE | KEY_QUERY_VALUE, &hKey);
 	if (lResult != ERROR_SUCCESS)
 	{
 		cout << "RegOpenKeyEx Error : " << GetLastError() << endl;
 		return 1;
 	}
 
-	DWORD enable = 1;
-	lResult = RegSetValueEx(hKey, _T("ProxyEnable"), 0, REG_DWORD, (BYTE*)&enable, sizeof(enable));
-	if (lResult != ERROR_SUCCESS)
+	if (Check == TRUE)
 	{
-		cout << "RegSetValueEx Enable Error : " << GetLastError() << endl;
-		RegCloseKey(hKey);
-		return 2;
-	}
+		lResult = RegQueryValueEx(hKey, _T("ProxyEnable"), NULL, &Type, (BYTE*)&OldValue, &Size);
+		DWORD enable = 1;
+		lResult = RegSetValueEx(hKey, _T("ProxyEnable"), 0, REG_DWORD, (BYTE*)&enable, sizeof(enable));
+		if (lResult != ERROR_SUCCESS)
+		{
+			cout << "RegSetValueEx Enable Error : " << GetLastError() << endl;
+			RegCloseKey(hKey);
+			return 2;
+		}
 
-	lResult = RegSetValueEx(hKey, _T("ProxyServer"), 0, REG_SZ, (BYTE*)IpPort, (DWORD)((_tcslen(IpPort) + 1) * sizeof(TCHAR)));
-	if (lResult != ERROR_SUCCESS)
+		lResult = RegSetValueEx(hKey, _T("ProxyServer"), 0, REG_SZ, (BYTE*)IpPort, (DWORD)((_tcslen(IpPort) + 1) * sizeof(TCHAR)));
+		if (lResult != ERROR_SUCCESS)
+		{
+			cout << "RegSetValueEx IpPortInsert Error : " << GetLastError() << endl;
+			RegCloseKey(hKey);
+			return 3;
+		}
+	}
+	else
 	{
-		cout << "RegSetValueEx IpPortInsert Error : " << GetLastError() << endl;
-		RegCloseKey(hKey);
-		return 3;
+		lResult = RegSetValueEx(hKey, _T("ProxyEnable"), 0, REG_DWORD, (BYTE*)&OldValue, sizeof(OldValue));
+		if (lResult != ERROR_SUCCESS)
+		{
+			cout << "RegSetValueEx Enable Error : " << GetLastError() << endl;
+			RegCloseKey(hKey);
+			return 2;
+		}
 	}
 
 	RegCloseKey(hKey);
@@ -187,39 +206,171 @@ int RunTimeStart()
 	return 0;
 }
 
-//int _tmain()
+int CheckReg()
+{
+	HKEY hKey;
+	LONG lResult = RegCreateKeyEx(HKEY_CURRENT_USER, RUN_SETTINGS, 0, NULL, NULL, KEY_READ, NULL, &hKey, NULL);
+	if (lResult != ERROR_SUCCESS)
+		return 1;
+	lResult = RegQueryValueEx(hKey, _T("AGENT"), NULL, NULL, NULL, NULL);
+	if (lResult == ERROR_FILE_NOT_FOUND)
+	{
+		RegCloseKey(hKey);
+		return 2;
+	}
+	RegCloseKey(hKey);
+	return 0;
+}
+
+void DeleteRunTimeSet()
+{
+	HKEY hKey;
+	LONG lResult = RegOpenKeyEx(HKEY_CURRENT_USER, RUN_SETTINGS, 0, KEY_SET_VALUE, &hKey);
+	if (lResult != ERROR_SUCCESS)
+	{
+		MessageBox(NULL, _T("레지스트리 삭제 실패"), _T("정보"), MB_ICONERROR);
+		return;
+	}
+	lResult = RegQueryValue(hKey, _T("AGENT"), NULL, NULL);
+	RegDeleteValue(hKey, _T("AGENT"));
+	RegCloseKey(hKey);
+}
+
+//int LOGIN(LPTSTR ID, LPTSTR PS)
 //{
-//	if (SetProxy(_T("127.0.0.1:8080")) != 0)
-//		cout << "Failed SetProxy" << endl;
-//	else
-//		cout << "Proxy Set Succese" << endl;
 //
-//	if (InstallRootCA(CA_CERT_FILE, FALSE) != 0)
-//		cout << "Failed, CA Install" << endl;
-//	else
-//		cout << "CA Install Succese" << endl;
-//
-//	getchar();
-//
-//	return 0;
 //}
+
+#define MAX_LAN		256
+BOOL LogInProc(HWND hDlg, UINT Msg, WPARAM wParam, LPARAM lParam)
+{
+	switch (Msg)
+	{
+	case WM_COMMAND:
+		switch (LOWORD(wParam))
+		{
+		case IDOK:
+		{
+			TCHAR ID[256], PS[256];
+			UINT CHResult = GetDlgItemText(hDlg, IDC_EDIT1, ID, sizeof(ID));
+			if (CHResult == 0)
+			{
+				MessageBox(hDlg, _T("없는 아이디 입니다."), _T("오류"), MB_ICONERROR);
+				return FALSE;
+			}
+			CHResult = GetDlgItemText(hDlg, IDC_EDIT2, PS, sizeof(PS));
+			if (CHResult == 0)
+			{
+				MessageBox(hDlg, _T("비밀번호가 틀렸습니다."), _T("오류"), MB_ICONERROR);
+				return FALSE;
+			}
+			EndDialog(hDlg, IDOK);
+			return TRUE;
+		}
+		case IDCANCEL:
+			EndDialog(hDlg, IDCANCEL);
+			return TRUE;
+		}
+	}
+	return FALSE;
+}
+
+struct HWORK
+{
+	HANDLE hWork;
+	DWORD dwThrId;
+};
+HWORK hw;
+NOTIFYICONDATA g_nid{ 0 };
+
+BOOL DlgProc(HWND hDlg, UINT Msg, WPARAM wParam, LPARAM lParam)
+{
+	switch (Msg)
+	{
+		case WM_INITDIALOG:
+			hw.hWork = CreateThread(NULL, 0, RegistryWatch, &hw, CREATE_SUSPENDED, &hw.dwThrId);
+			if (CheckReg() == 0)
+			{
+				HWND hc = GetDlgItem(hDlg, IDC_CHECK3);
+				SendMessage(hc, BM_SETCHECK, BST_CHECKED, NULL);
+				SetProxy(_T("127.0.0.1:8080"));
+				ResumeThread(hw.hWork);
+			}
+			break;
+		case WM_COMMAND:
+			switch (LOWORD(wParam))
+			{
+				case IDOK:
+				{
+					HWND hc1 = GetDlgItem(hDlg, IDC_CHECK1);	//프록시 설정
+					if (SendMessage(hc1, BM_GETCHECK, 0, 0) == BST_CHECKED)
+					{
+						if (SetProxy(_T("127.0.0.1:8080")) != 0)
+							return FALSE;
+						InstallRootCA(CA_CERT_FILE, FALSE);
+					}
+					HWND hc3 = GetDlgItem(hDlg, IDC_CHECK3);	//실행시 시작 및 실시간 감지
+					if (SendMessage(hc3, BM_GETCHECK, 0, 0) == BST_CHECKED)
+					{
+						RunTimeStart();
+						SetProxy(_T("127.0.0.1:8080"));
+						ResumeThread(hw.hWork);
+					}
+
+					MessageBeep(1);
+					MessageBox(hDlg, _T("적용 완료"), _T("정보"), MB_OK);
+					SendMessage(hc1, BM_SETCHECK, BST_UNCHECKED, 0);
+					return TRUE;
+				}
+				case IDCANCEL:
+				{
+					g_nid.cbSize = sizeof(NOTIFYICONDATA);
+					g_nid.hWnd = hDlg;
+					g_nid.uID = 1;	//아이콘의 ID(임의 지정)
+					g_nid.uFlags = NIF_ICON | NIF_MESSAGE | NIF_TIP;
+					g_nid.uCallbackMessage = WM_TRAYICON;	//트레이 아이콘 관련 메시지 처리
+					g_nid.hIcon = LoadIcon(NULL, IDI_APPLICATION);	//시스템 기본 아이콘 사용
+					_tcscpy(g_nid.szTip, _T("프록시 프로그램"));
+					Shell_NotifyIcon(NIM_ADD, &g_nid);	//트레이 아이콘 등록
+
+					ShowWindow(hDlg, SW_HIDE);	//창 숨김
+					return TRUE;
+				}
+			}
+			break;
+		case WM_TRAYICON:
+			if (lParam == WM_LBUTTONDBLCLK)	//왼쪽 더블클릭 시 복원
+			{
+				ShowWindow(hDlg, SW_SHOW);
+				SetForegroundWindow(hDlg);
+				// 복원 후 더 이상 필요없으므로 트레이 아이콘 삭제
+				Shell_NotifyIcon(NIM_DELETE, &g_nid);
+			}
+			break;
+		case WM_CLOSE:
+		{
+			HWND hc = GetDlgItem(hDlg, IDC_CHECK2);
+			if (SendMessage(hc, BM_GETCHECK, 0, 0) == BST_CHECKED)
+			{
+				SetProxy(_T("127.0.0.1:8080"), FALSE);
+				DeleteRunTimeSet();
+			}
+			//아이콘 삭제 로직
+			Shell_NotifyIcon(NIM_DELETE, &g_nid);
+			CloseHandle(hw.hWork);
+			EndDialog(hDlg, IDCANCEL);
+			return TRUE;
+		}
+	}
+	return FALSE;
+}
 
 int APIENTRY WinMain(HINSTANCE hInst, HINSTANCE hPrev, LPSTR lpCmd, int nShow)
 {
-	RunTimeStart();
-	SetProxy(_T("127.0.0.1:8080"));
-	InstallRootCA(CA_CERT_FILE, FALSE);
-	HANDLE hThread = CreateThread(NULL, 0, RegistryWatch, NULL, 0, NULL);
-
-	MSG msg;
-	while (GetMessage(&msg, NULL, 0, 0))
+	INT_PTR Check = DialogBox(hInst, MAKEINTRESOURCE(IDD_DIALOG1), HWND_DESKTOP, (DLGPROC)LogInProc);
+	if (Check == IDOK)
 	{
-		TranslateMessage(&msg);
-		DispatchMessage(&msg);
+		DialogBox(hInst, MAKEINTRESOURCE(IDD_DIALOG2), HWND_DESKTOP, (DLGPROC)DlgProc);
 	}
-
-	WaitForSingleObject(hThread, INFINITE);
-	CloseHandle(hThread);
-
 	return 0;
 }
