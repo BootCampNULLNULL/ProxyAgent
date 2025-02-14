@@ -24,41 +24,37 @@ int SetProxy(LPCTSTR IpPort,BOOL Check = TRUE)
 	DWORD Type = 0, Size = sizeof(DWORD);
 	static DWORD OldValue = 0;
 	LONG lResult = RegOpenKeyEx(HKEY_CURRENT_USER, INTERNET_SETTINGS, 0, KEY_SET_VALUE | KEY_QUERY_VALUE, &hKey);
-	if (lResult != ERROR_SUCCESS)
+	try
 	{
-		cout << "RegOpenKeyEx Error : " << GetLastError() << endl;
-		return 1;
-	}
-
-	if (Check == TRUE)
-	{
-		lResult = RegQueryValueEx(hKey, _T("ProxyEnable"), NULL, &Type, (BYTE*)&OldValue, &Size);
-		DWORD enable = 1;
-		lResult = RegSetValueEx(hKey, _T("ProxyEnable"), 0, REG_DWORD, (BYTE*)&enable, sizeof(enable));
 		if (lResult != ERROR_SUCCESS)
+			throw 1;
+
+		if (Check == TRUE)
 		{
-			cout << "RegSetValueEx Enable Error : " << GetLastError() << endl;
-			RegCloseKey(hKey);
-			return 2;
+			lResult = RegQueryValueEx(hKey, _T("ProxyEnable"), NULL, &Type, (BYTE*)&OldValue, &Size);
+			DWORD enable = 1;
+			lResult = RegSetValueEx(hKey, _T("ProxyEnable"), 0, REG_DWORD, (BYTE*)&enable, sizeof(enable));
+			if (lResult != ERROR_SUCCESS)
+				throw lResult;
+
+			lResult = RegSetValueEx(hKey, _T("ProxyServer"), 0, REG_SZ, (BYTE*)IpPort, (DWORD)((_tcslen(IpPort) + 1) * sizeof(TCHAR)));
+			if (lResult != ERROR_SUCCESS)
+				throw lResult;
 		}
-
-		lResult = RegSetValueEx(hKey, _T("ProxyServer"), 0, REG_SZ, (BYTE*)IpPort, (DWORD)((_tcslen(IpPort) + 1) * sizeof(TCHAR)));
-		if (lResult != ERROR_SUCCESS)
+		else
 		{
-			cout << "RegSetValueEx IpPortInsert Error : " << GetLastError() << endl;
-			RegCloseKey(hKey);
-			return 3;
+			lResult = RegSetValueEx(hKey, _T("ProxyEnable"), 0, REG_DWORD, (BYTE*)&OldValue, sizeof(OldValue));
+			if (lResult != ERROR_SUCCESS)
+				throw lResult;
 		}
 	}
-	else
+	catch (int lErr)
 	{
-		lResult = RegSetValueEx(hKey, _T("ProxyEnable"), 0, REG_DWORD, (BYTE*)&OldValue, sizeof(OldValue));
-		if (lResult != ERROR_SUCCESS)
-		{
-			cout << "RegSetValueEx Enable Error : " << GetLastError() << endl;
-			RegCloseKey(hKey);
-			return 2;
-		}
+		MessageBox(NULL, _T("SetProxError"), _T("에러"), MB_ICONERROR);
+		if (lErr == 1)
+			return lErr;
+		RegCloseKey(hKey);
+		return lErr;
 	}
 
 	RegCloseKey(hKey);
@@ -73,99 +69,84 @@ int SetProxy(LPCTSTR IpPort,BOOL Check = TRUE)
 int InstallRootCA(LPCTSTR certFilePath, BOOL Wide) //Wide == FALSE(Current User스토어) Wide == True(Local Machine 루트 스토어(관리자 권한 요함)
 {
 	HANDLE hFile = CreateFile(certFilePath, GENERIC_READ, FILE_SHARE_READ, NULL, OPEN_EXISTING, FILE_ATTRIBUTE_NORMAL, NULL);
-	if (hFile == INVALID_HANDLE_VALUE)
+	DWORD fileSize = 0, bytesRead;
+	BYTE* pCertData = NULL;
+	HCERTSTORE hStore = NULL;
+	BOOL bRet = FALSE;
+	try
 	{
-		cout << "File Open Fail, Code : " << GetLastError() << endl;
-		return 1;
-	}
+		if (hFile == INVALID_HANDLE_VALUE)
+			throw 1;
 
-	DWORD fileSize = GetFileSize(hFile, NULL);
-	if (fileSize == INVALID_FILE_SIZE || fileSize == 0)
-	{
-		cout << "File size = %d" << fileSize << endl;
+		fileSize = GetFileSize(hFile, NULL);
+		if (fileSize == INVALID_FILE_SIZE || fileSize == 0)
+			throw 2;
+		//파일을 메모리 맵핑
+		pCertData = (BYTE*)HeapAlloc(GetProcessHeap(), 0, fileSize);
+		if (!pCertData)
+			throw 3;
+
+		if (!ReadFile(hFile, pCertData, fileSize, &bytesRead, NULL) || (bytesRead != fileSize))
+			throw 4;
+
 		CloseHandle(hFile);
-		return 2;
-	}
-	//파일을 메모리 맵핑
-	BYTE* pCertData = (BYTE*)HeapAlloc(GetProcessHeap(), 0, fileSize);
-	if (!pCertData)
-	{
-		cout << "File memory map faile, code : " << GetLastError() << endl;
-		CloseHandle(hFile);
-		return 3;
-	}
 
-	DWORD bytesRead;
-	if (!ReadFile(hFile, pCertData, fileSize, &bytesRead, NULL) || (bytesRead != fileSize))
-	{
-		cout << "File Read faile, code : " << GetLastError() << endl;
-		HeapFree(GetProcessHeap(), 0, pCertData);
-		CloseHandle(hFile);
-		return 4;
-	}
+		//인증서 스토어 여는 작업
+		hStore = CertOpenStore(CERT_STORE_PROV_SYSTEM, 0, NULL, (Wide ? CERT_SYSTEM_STORE_LOCAL_MACHINE : CERT_SYSTEM_STORE_CURRENT_USER)
+			| CERT_STORE_OPEN_EXISTING_FLAG
+			| CERT_STORE_READONLY_FLAG, _T("ROOT")
+		);
+		if (!hStore)
+			throw 5;
 
-	CloseHandle(hFile);
+		//인증서를 스토어에 추가
+		bRet = CertAddEncodedCertificateToStore(
+			hStore, X509_ASN_ENCODING,
+			pCertData, fileSize,
+			CERT_STORE_ADD_USE_EXISTING,//이미 있는 인증서면 재사용
+			NULL
+		);
+		if (!bRet)
+			throw 6;
 
-	//인증서 스토어 여는 작업
-	HCERTSTORE hStore = CertOpenStore(CERT_STORE_PROV_SYSTEM, 0, NULL, (Wide ? CERT_SYSTEM_STORE_LOCAL_MACHINE : CERT_SYSTEM_STORE_CURRENT_USER)
-		| CERT_STORE_OPEN_EXISTING_FLAG
-		| CERT_STORE_READONLY_FLAG, _T("ROOT")
-	);
-
-	if (!hStore)
-	{
-		cout << "CertOpenStore failed. \n" << endl;
-		HeapFree(GetProcessHeap(), 0, pCertData);
-		return 5;
-	}
-
-	//인증서를 스토어에 추가
-	BOOL bRet = CertAddEncodedCertificateToStore(
-		hStore, X509_ASN_ENCODING,
-		pCertData, fileSize,
-		CERT_STORE_ADD_USE_EXISTING,//이미 있는 인증서면 재사용
-		NULL
-	);
-	if (!bRet)
-	{
-		cout << "CertAdd To Store failed, code : " << GetLastError() << endl;
+		//정리 작업
 		CertCloseStore(hStore, 0);
 		HeapFree(GetProcessHeap(), 0, pCertData);
-		return 6;
 	}
-
-	//정리 작업
-	CertCloseStore(hStore, 0);
-	HeapFree(GetProcessHeap(), 0, pCertData);
-
-	cout << "CA Installed success." << endl;
+	catch (int lErr)
+	{
+		if (lErr >= 2 && lErr <= 4)
+		{
+			if (lErr == 4)
+				HeapFree(GetProcessHeap(), 0, pCertData);
+			CloseHandle(hFile);
+		}
+		else if (lErr == 5 || lErr == 6)
+		{
+			if (lErr == 6)
+				CertCloseStore(hStore, 0);
+			HeapFree(GetProcessHeap(), 0, pCertData);
+		}
+		MessageBox(NULL, _T("인증서 설치 에러"), _T("에러"), MB_ICONERROR);
+		return 1;
+	}
 	return 0;
 }
 
 DWORD WINAPI RegistryWatch(LPVOID lpParam)
 {
 	HKEY hKey;
-	HANDLE hEvent;
 	
 	LONG lResult = RegOpenKeyEx(HKEY_CURRENT_USER, INTERNET_SETTINGS, 0, KEY_NOTIFY | KEY_QUERY_VALUE | KEY_SET_VALUE, &hKey);
 	if (lResult != ERROR_SUCCESS)
 		return 1;
 
-	hEvent = CreateEvent(NULL, FALSE, FALSE, NULL);
-	if (!hEvent)
-	{
-		RegCloseKey(hKey);
-		return 2;
-	}
-
 	while (true)
 	{
-		lResult = RegNotifyChangeKeyValue(hKey, FALSE, REG_NOTIFY_CHANGE_LAST_SET, hEvent, TRUE);
+		lResult = RegNotifyChangeKeyValue(hKey, FALSE, REG_NOTIFY_CHANGE_LAST_SET, NULL, FALSE);
 		if (lResult != ERROR_SUCCESS)
 			break;
-
-		DWORD dwWait = WaitForSingleObject(hEvent, INFINITE);
-		if (dwWait == WAIT_OBJECT_0)
+		else
 		{
 			DWORD dwType = 0, dwEnable = 0, dwSize = sizeof(dwEnable);
 			if (RegQueryValueEx(hKey, _T("ProxyEnable"), NULL, &dwType, (BYTE*)&dwEnable, &dwSize) == ERROR_SUCCESS)
@@ -182,8 +163,6 @@ DWORD WINAPI RegistryWatch(LPVOID lpParam)
 			}
 		}
 	}
-
-	CloseHandle(hEvent);
 	RegCloseKey(hKey);
 	return 0;
 }
@@ -289,6 +268,7 @@ BOOL DlgProc(HWND hDlg, UINT Msg, WPARAM wParam, LPARAM lParam)
 	{
 		case WM_INITDIALOG:
 			hw.hWork = CreateThread(NULL, 0, RegistryWatch, &hw, CREATE_SUSPENDED, &hw.dwThrId);
+			//RegChgNoti함수는 영속성 스레드를 필요로함 => 사용자tp로 영속성을 만든후 제공하는 방법으로 수정헤볼것
 			if (CheckReg() == 0)
 			{
 				HWND hc = GetDlgItem(hDlg, IDC_CHECK3);
@@ -305,9 +285,13 @@ BOOL DlgProc(HWND hDlg, UINT Msg, WPARAM wParam, LPARAM lParam)
 					HWND hc1 = GetDlgItem(hDlg, IDC_CHECK1);	//프록시 설정
 					if (SendMessage(hc1, BM_GETCHECK, 0, 0) == BST_CHECKED)
 					{
+						if (InstallRootCA(CA_CERT_FILE, FALSE) != 0)
+						{
+							SendMessage(hc1, BM_SETCHECK, BST_UNCHECKED, 0);
+							return FALSE;
+						}
 						if (SetProxy(_T("127.0.0.1:8080")) != 0)
 							return FALSE;
-						InstallRootCA(CA_CERT_FILE, FALSE);
 					}
 					HWND hc3 = GetDlgItem(hDlg, IDC_CHECK3);	//실행시 시작 및 실시간 감지
 					if (SendMessage(hc3, BM_GETCHECK, 0, 0) == BST_CHECKED)
@@ -322,6 +306,7 @@ BOOL DlgProc(HWND hDlg, UINT Msg, WPARAM wParam, LPARAM lParam)
 					SendMessage(hc1, BM_SETCHECK, BST_UNCHECKED, 0);
 					return TRUE;
 				}
+				break;
 				case IDCANCEL:
 				{
 					g_nid.cbSize = sizeof(NOTIFYICONDATA);
@@ -336,6 +321,7 @@ BOOL DlgProc(HWND hDlg, UINT Msg, WPARAM wParam, LPARAM lParam)
 					ShowWindow(hDlg, SW_HIDE);	//창 숨김
 					return TRUE;
 				}
+				break;
 			}
 			break;
 		case WM_TRAYICON:
@@ -361,6 +347,7 @@ BOOL DlgProc(HWND hDlg, UINT Msg, WPARAM wParam, LPARAM lParam)
 			EndDialog(hDlg, IDCANCEL);
 			return TRUE;
 		}
+		break;
 	}
 	return FALSE;
 }
