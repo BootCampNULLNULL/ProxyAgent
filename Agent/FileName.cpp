@@ -221,38 +221,38 @@ void DeleteRunTimeSet()
 //}
 
 #define MAX_LAN		256
-BOOL LogInProc(HWND hDlg, UINT Msg, WPARAM wParam, LPARAM lParam)
-{
-	switch (Msg)
-	{
-	case WM_COMMAND:
-		switch (LOWORD(wParam))
-		{
-		case IDOK:
-		{
-			TCHAR ID[256], PS[256];
-			UINT CHResult = GetDlgItemText(hDlg, IDC_EDIT1, ID, sizeof(ID));
-			if (CHResult == 0)
-			{
-				MessageBox(hDlg, _T("없는 아이디 입니다."), _T("오류"), MB_ICONERROR);
-				return FALSE;
-			}
-			CHResult = GetDlgItemText(hDlg, IDC_EDIT2, PS, sizeof(PS));
-			if (CHResult == 0)
-			{
-				MessageBox(hDlg, _T("비밀번호가 틀렸습니다."), _T("오류"), MB_ICONERROR);
-				return FALSE;
-			}
-			EndDialog(hDlg, IDOK);
-			return TRUE;
-		}
-		case IDCANCEL:
-			EndDialog(hDlg, IDCANCEL);
-			return TRUE;
-		}
-	}
-	return FALSE;
-}
+//BOOL LogInProc(HWND hDlg, UINT Msg, WPARAM wParam, LPARAM lParam)
+//{
+//	switch (Msg)
+//	{
+//	case WM_COMMAND:
+//		switch (LOWORD(wParam))
+//		{
+//		case IDOK:
+//		{
+//			TCHAR ID[256], PS[256];
+//			UINT CHResult = GetDlgItemText(hDlg, IDC_EDIT1, ID, sizeof(ID));
+//			if (CHResult == 0)
+//			{
+//				MessageBox(hDlg, _T("없는 아이디 입니다."), _T("오류"), MB_ICONERROR);
+//				return FALSE;
+//			}
+//			CHResult = GetDlgItemText(hDlg, IDC_EDIT2, PS, sizeof(PS));
+//			if (CHResult == 0)
+//			{
+//				MessageBox(hDlg, _T("비밀번호가 틀렸습니다."), _T("오류"), MB_ICONERROR);
+//				return FALSE;
+//			}
+//			EndDialog(hDlg, IDOK);
+//			return TRUE;
+//		}
+//		case IDCANCEL:
+//			EndDialog(hDlg, IDCANCEL);
+//			return TRUE;
+//		}
+//	}
+//	return FALSE;
+//}
 
 struct HWORK
 {
@@ -269,6 +269,7 @@ BOOL DlgProc(HWND hDlg, UINT Msg, WPARAM wParam, LPARAM lParam)
 		case WM_INITDIALOG:
 			hw.hWork = CreateThread(NULL, 0, RegistryWatch, &hw, CREATE_SUSPENDED, &hw.dwThrId);
 			//RegChgNoti함수는 영속성 스레드를 필요로함 => 사용자tp로 영속성을 만든후 제공하는 방법으로 수정헤볼것
+			//해당 프로그램은 스레드풀 적용이 필요없다고 판단 사용자 정의 영속 스레드를 만들어 제공해도 무방(비동기 아니므로)
 			if (CheckReg() == 0)
 			{
 				HWND hc = GetDlgItem(hDlg, IDC_CHECK3);
@@ -354,10 +355,11 @@ BOOL DlgProc(HWND hDlg, UINT Msg, WPARAM wParam, LPARAM lParam)
 
 int APIENTRY WinMain(HINSTANCE hInst, HINSTANCE hPrev, LPSTR lpCmd, int nShow)
 {
-	INT_PTR Check = DialogBox(hInst, MAKEINTRESOURCE(IDD_DIALOG1), HWND_DESKTOP, (DLGPROC)LogInProc);
-	if (Check == IDOK)
-	{
-		DialogBox(hInst, MAKEINTRESOURCE(IDD_DIALOG2), HWND_DESKTOP, (DLGPROC)DlgProc);
-	}
+	//INT_PTR Check = DialogBox(hInst, MAKEINTRESOURCE(IDD_DIALOG1), HWND_DESKTOP, (DLGPROC)LogInProc);
+	//if (Check == IDOK)
+	//{
+	//	DialogBox(hInst, MAKEINTRESOURCE(IDD_DIALOG2), HWND_DESKTOP, (DLGPROC)DlgProc);
+	//}
+	DialogBox(hInst, MAKEINTRESOURCE(IDD_DIALOG2), HWND_DESKTOP, (DLGPROC)DlgProc);
 	return 0;
 }
